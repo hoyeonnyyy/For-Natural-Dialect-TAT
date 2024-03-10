@@ -50,15 +50,22 @@ https://github.com/wonjune-kang/lvc-vc
 여기에서 가져옴 
 
 위의 jss 데이터셋이라도 학습 시키려고 preprocessing 폴더의 
+
 resample_vctk.py
+
 extract_f0_metadata.py
+
 extract_all_features.py
+
 split_data.py
+
 preprocess_speaker_embs.py
+
 이 순서대로 전처리 해보았는데 학습 제대로 안되고 컴퓨터도 돌리고 있는데 마감시간 부족해서 결국 못했음ㅎ 아쉽다
 ***
 # ALL
 
 all.py 파일 경로들 다 맞춰주면 돌아감
-모델들 돌려보거나 자소서/면접 준비할때 모르는거 있으면 편하게 물어보세요^^
+
+모델들 돌려보거나 자소서/면접 준비할때 모르는거 있으면 편하게 물어보세요^^ 
 ***
