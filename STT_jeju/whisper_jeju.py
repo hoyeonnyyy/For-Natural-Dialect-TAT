@@ -1,0 +1,108 @@
+import torch
+from dataclasses import dataclass
+from typing import Any, Dict, List, Union
+from transformers import WhisperTokenizer, WhisperFeatureExtractor
+from transformers import WhisperProcessor
+import evaluate
+from transformers import WhisperForConditionalGeneration
+from transformers import Seq2SeqTrainingArguments
+from transformers import Seq2SeqTrainer
+from datasets import load_dataset
+from datasets import load_from_disk
+
+local_dataset_path = "C:/STT_jeju/After_Preprocessing"
+low_call_voices_prepreocessed = load_from_disk(local_dataset_path)
+
+@dataclass
+class DataCollatorSpeechSeq2SeqWithPadding:
+    processor: Any
+
+    def __call__(self, features: List[Dict[str, Union[List[int], torch.Tensor]]]) -> Dict[str, torch.Tensor]:
+        # 인풋 데이터와 라벨 데이터의 길이가 다르며, 따라서 서로 다른 패딩 방법이 적용되어야 한다. 그러므로 두 데이터를 분리해야 한다.
+        # 먼저 오디오 인풋 데이터를 간단히 토치 텐서로 반환하는 작업을 수행한다.
+        input_features = [{"input_features": feature["input_features"]} for feature in features]
+
+        batch = self.processor.feature_extractor.pad(input_features, return_tensors="pt")
+
+        # Tokenize된 레이블 시퀀스를 가져온다.s
+        label_features = [{"input_ids": feature["labels"]} for feature in features]
+        # 레이블 시퀀스에 대해 최대 길이만큼 패딩 작업을 실시한다.
+        labels_batch = self.processor.tokenizer.pad(label_features, return_tensors="pt")
+
+        # 패딩 토큰을 -100으로 치환하여 loss 계산 과정에서 무시되도록 한다.
+        labels = labels_batch["input_ids"].masked_fill(labels_batch.attention_mask.ne(1), -100)
+
+        # 이전 토크나이즈 과정에서 bos 토큰이 추가되었다면 bos 토큰을 잘라낸다.
+        # 해당 토큰은 이후 언제든 추가할 수 있다.
+        if (labels[:, 0] == self.processor.tokenizer.bos_token_id).all().cpu().item():
+            labels = labels[:, 1:]
+
+        batch["labels"] = labels
+
+        return batch
+    
+model_path = "C:/STT_jeju/whisper_fourth_model/pytorch_model"
+processor = WhisperProcessor.from_pretrained(model_path)
+model = WhisperForConditionalGeneration.from_pretrained(model_path)
+
+data_collator = DataCollatorSpeechSeq2SeqWithPadding(processor=processor)
+
+metric = evaluate.load('cer')
+
+def compute_metrics(pred):
+    pred_ids = pred.predictions
+    label_ids = pred.label_ids
+
+    # pad_token을 -100으로 치환
+    label_ids[label_ids == -100] = processor.tokenizer.pad_token_id
+
+    # metrics 계산 시 special token들을 빼고 계산하도록 설정
+    pred_str = processor.tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
+    label_str = processor.tokenizer.batch_decode(label_ids, skip_special_tokens=True)
+
+    cer = 100 * metric.compute(predictions=pred_str, references=label_str)
+
+    return {"cer": cer}
+
+model.config.forced_decoder_ids = None
+model.config.suppress_tokens = []
+
+training_args = Seq2SeqTrainingArguments(
+    output_dir="C:/STT_jeju/whisper_fifth_model",  # 로컬에 저장할 디렉토리 경로
+    per_device_train_batch_size=8,
+    gradient_accumulation_steps=1,  # 배치 크기가 2배 감소할 때마다 2배씩 증가
+    learning_rate=1e-5,
+    warmup_steps=500,
+    max_steps=20000,  # epoch 대신 설정
+    gradient_checkpointing=True,
+    fp16=True,
+    evaluation_strategy="steps",
+    per_device_eval_batch_size=8,
+    predict_with_generate=True,
+    generation_max_length=225,
+    save_steps=2000,
+    eval_steps=2000,
+    logging_steps=25,
+    report_to=["tensorboard"],
+    load_best_model_at_end=True,
+    metric_for_best_model="cer",  # 한국어의 경우 'wer'보다는 'cer'이 더 적합할 것
+    greater_is_better=False,
+)
+
+trainer = Seq2SeqTrainer(
+    args=training_args,
+    model=model,
+    train_dataset=low_call_voices_prepreocessed["train"],
+    eval_dataset=low_call_voices_prepreocessed["valid"],  # or "test"
+    data_collator=data_collator,
+    compute_metrics=compute_metrics,
+    tokenizer=processor.tokenizer,
+)
+
+trainer.train()
+
+trainer.evaluate()
+
+# 트레이너에서 학습한 모델을 로컬에 저장
+model.save_pretrained("C:/STT_jeju/whisper_fifth_model/pytorch_model")
+processor.save_pretrained("C:/STT_jeju/whisper_fifth_model/pytorch_model")

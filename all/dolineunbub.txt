@@ -1,0 +1,5 @@
+1. https://visualstudio.microsoft.com/ko/visual-cpp-build-tools/
+이걸 깔아야한다. -> 
+2. 
+requirements.txt를 깔아야한다
+3. 파일 불러오는 경로를 잘 설정해야한다
